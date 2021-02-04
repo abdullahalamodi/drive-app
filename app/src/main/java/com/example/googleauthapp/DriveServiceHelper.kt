@@ -12,9 +12,8 @@ import com.google.api.client.http.ByteArrayContent
 import com.google.api.services.drive.Drive
 import com.google.api.services.drive.model.File
 import com.google.api.services.drive.model.FileList
-import java.io.BufferedReader
-import java.io.IOException
-import java.io.InputStreamReader
+import java.io.*
+import java.nio.channels.FileChannel
 import java.util.*
 import java.util.concurrent.Callable
 import java.util.concurrent.Executor
@@ -153,28 +152,26 @@ class DriveServiceHelper(private val mDriveService: Drive) {
     }
 
 
-//    fun downloadFile(
-//        targetFile: java.io.File?,
-//        fileId: String?
-//    ): Task<String?>? {
-//        return Tasks.call(
-//            mExecutor,
-//            Callable {
-//                // Retrieve the metadata as a File object.
-//                val outputStream: OutputStream = FileOutputStream(targetFile)
-//                mDriveService.files()[fileId].executeMediaAndDownloadTo(outputStream)
-//                return@Callable null
-//            }
-//        )
-//    }
-
-
-    fun queryFiles(folderId: String?): Task<List<GoogleDriveFileHolder?>?>? {
-        return Tasks.call<List<GoogleDriveFileHolder?>?>(
+    fun downloadFile(
+        targetFile: java.io.File?,
+        fileId: String?
+    ): Task<String?>? {
+        return Tasks.call<String?>(
             mExecutor,
             Callable {
-                val googleDriveFileHolderList: MutableList<GoogleDriveFileHolder> =
-                    ArrayList()
+                // Retrieve the metadata as a File object.
+                val outputStream: OutputStream = FileOutputStream(targetFile)
+                mDriveService.files()[fileId].executeMediaAndDownloadTo(outputStream)
+                return@Callable null
+            }
+        )
+    }
+
+
+    fun queryFiles(folderId: String?): Task<String?>? {
+        return Tasks.call<String?>(
+            mExecutor,
+            Callable {
                 var parent = "root"
                 if (folderId != null) {
                     parent = folderId
@@ -183,27 +180,11 @@ class DriveServiceHelper(private val mDriveService: Drive) {
                     mDriveService.files().list().setQ("'$parent' in parents")
                         .setFields("files(id, name,size,createdTime,modifiedTime,starred)")
                         .setSpaces("drive").execute()
-                for (i in result.files.indices) {
-                    val googleDriveFileHolder = GoogleDriveFileHolder()
-                    googleDriveFileHolder.id = result.files[i].id
-                    googleDriveFileHolder.name = result.files[i].name
-                    if (result.files[i].getSize() != null) {
-                        googleDriveFileHolder.size = result.files[i].getSize()
-                    }
-                    if (result.files[i].modifiedTime != null) {
-                        googleDriveFileHolder.modifiedTime =
-                            result.files[i].modifiedTime
-                    }
-                    if (result.files[i].createdTime != null) {
-                        googleDriveFileHolder.createdTime =
-                            result.files[i].createdTime
-                    }
-                    if (result.files[i].starred != null) {
-                        googleDriveFileHolder.starred = result.files[i].starred
-                    }
-                    googleDriveFileHolderList.add(googleDriveFileHolder)
+                if (result.files.size > 0){
+                    return@Callable result.files[0].id
+                }else{
+                return@Callable null
                 }
-                return@Callable googleDriveFileHolderList
             }
         )
     }
@@ -347,6 +328,24 @@ class DriveServiceHelper(private val mDriveService: Drive) {
         var TYPE_UNKNOWN = "application/vnd.google-apps.unknown"
         var TYPE_VIDEO = "application/vnd.google-apps.video"
         var TYPE_3_RD_PARTY_SHORTCUT = "application/vnd.google-apps.drive-sdk"
+
+
+        @Throws(IOException::class)
+        fun copyFile(fromFile: FileInputStream, toFile: FileOutputStream) {
+            var fromChannel: FileChannel? = null
+            var toChannel: FileChannel? = null
+            try {
+                fromChannel = fromFile.channel
+                toChannel = toFile.channel
+                fromChannel.transferTo(0, fromChannel.size(), toChannel)
+            } finally {
+                try {
+                    fromChannel?.close()
+                } finally {
+                    toChannel?.close()
+                }
+            }
+        }
     }
 
 }

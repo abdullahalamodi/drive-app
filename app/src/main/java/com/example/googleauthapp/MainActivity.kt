@@ -7,6 +7,7 @@ import android.widget.Button
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
+import com.example.googleauthapp.database.StudentRepository
 import com.google.android.gms.auth.api.signin.GoogleSignIn
 import com.google.android.gms.auth.api.signin.GoogleSignInAccount
 import com.google.android.gms.auth.api.signin.GoogleSignInClient
@@ -22,7 +23,7 @@ import com.google.api.client.http.FileContent
 import com.google.api.client.json.gson.GsonFactory
 import com.google.api.services.drive.Drive
 import com.google.gson.Gson
-import java.io.File
+import java.io.*
 import java.util.*
 
 
@@ -39,8 +40,9 @@ class MainActivity : AppCompatActivity() {
         signInButton = findViewById(R.id.sign_in_button)
         uploadButton = findViewById(R.id.upload_btn)
         namView = findViewById(R.id.name_tv)
-
-
+//        addStudent()
+        getStudents()
+        checkIfDatabaseFile()
         signInButton.setOnClickListener {
             signIn()
         }
@@ -62,6 +64,30 @@ class MainActivity : AppCompatActivity() {
         // the GoogleSignInAccount will be non-null.
         myAccount = GoogleSignIn.getLastSignedInAccount(this)
         updateUI(myAccount)
+    }
+
+    private fun addStudent() {
+        StudentRepository.get().addStudent(
+            Student("2")
+        )
+    }
+
+    private fun getStudents() {
+        StudentRepository.get().getStudents().observe(
+            this,
+            androidx.lifecycle.Observer {
+                namView.text = it.size.toString()
+            }
+        )
+    }
+
+    private fun checkIfDatabaseFile() {
+        StudentRepository.get().closeDb()
+        val database = getDatabasePath(DB_NAME)
+        Toast.makeText(
+            this, database.isFile.toString(),
+            Toast.LENGTH_SHORT
+        ).show()
     }
 
     private fun updateUI(account: GoogleSignInAccount?) {
@@ -174,9 +200,11 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun createSQLFile(folderId: String) {
-        val databasePath = getDatabasePath(DB_NAME).absolutePath
-        val filePath = File(databasePath)
-        val mediaContent = FileContent("application/sqlite", filePath)
+        StudentRepository.get().closeDb()
+        val database = getDatabasePath(DB_NAME)
+//        val databasePath = database.absolutePath
+//        val filePath = File(databasePath)
+        val mediaContent = FileContent("application/sqlite", database)
         mDriveServiceHelper.createSQlFile(
             databaseName = DB_NAME,
             mediaContent = mediaContent,
@@ -184,6 +212,7 @@ class MainActivity : AppCompatActivity() {
         )
             ?.addOnSuccessListener { fileId ->
                 Toast.makeText(this, "success : $fileId", Toast.LENGTH_SHORT).show()
+                getFileId(folderId)
             }
             ?.addOnFailureListener { e ->
                 Log.d(
@@ -199,7 +228,9 @@ class MainActivity : AppCompatActivity() {
         // if folder id is null, it will save file to the root
         mDriveServiceHelper.createFolder(FOLDER_NAME, null)
             ?.addOnSuccessListener { folderId ->
+                namView.text = folderId
 //                createSQLFile(folderId)
+                getFileId(folderId)
             }
             ?.addOnFailureListener { e ->
                 Log.d(
@@ -211,10 +242,28 @@ class MainActivity : AppCompatActivity() {
     }
 
 
-    private fun getFile(folderId: String) {
+    private fun getFileId(folderId: String) {
         mDriveServiceHelper.queryFiles(folderId)
-            ?.addOnSuccessListener { filesList ->
-                namView.text = filesList?.get(0)?.name
+            ?.addOnSuccessListener { fileId ->
+                namView.text = fileId
+                downloadFile(fileId!!)
+            }
+            ?.addOnFailureListener { e ->
+                Log.d(
+                    TAG,
+                    "onFailure: " + e.message
+                )
+            }
+    }
+
+    private fun downloadFile(fileId: String) {
+        val targetFile = File("backup")
+        mDriveServiceHelper.downloadFile(
+            targetFile = targetFile,
+            fileId = fileId
+        )
+            ?.addOnSuccessListener {
+                restoreDb(targetFile.inputStream())
             }
             ?.addOnFailureListener { e ->
                 Log.d(
@@ -227,10 +276,13 @@ class MainActivity : AppCompatActivity() {
     private fun getFolderId() {
         mDriveServiceHelper.getFolderId(FOLDER_NAME)
             ?.addOnSuccessListener { folderId ->
-                namView.text = folderId
-//                createSQLFile(folderId!!)
-//                createFile(folderId!!)
-                getFile(folderId!!)
+                if (folderId == null) {
+                    createFolder()
+                } else {
+                    namView.text = folderId
+//                    createSQLFile(folderId)
+                    getFileId(folderId)
+                }
             }
             ?.addOnFailureListener { e ->
                 Log.d(
@@ -238,6 +290,26 @@ class MainActivity : AppCompatActivity() {
                     "onFailure: " + e.message
                 )
             }
+    }
+
+    private fun restoreDb(inputStreamNewDB: InputStream?) {
+        StudentRepository.get().closeDb()
+        val oldDB: File = getDatabasePath(DB_NAME)
+        if (inputStreamNewDB != null) {
+            try {
+                DriveServiceHelper.copyFile(
+                    (inputStreamNewDB as FileInputStream?)!!,
+                    FileOutputStream(oldDB)
+                )
+                Toast.makeText(this, "success : restore", Toast.LENGTH_SHORT).show()
+                //Take the user to home screen and there we will validate if the database file was actually restored correctly.
+            } catch (e: IOException) {
+                Log.d(TAG, "ex for is of restore: $e")
+                e.printStackTrace()
+            }
+        } else {
+            Log.d(TAG, "Restore - file does not exists")
+        }
     }
 
 
@@ -277,6 +349,6 @@ class MainActivity : AppCompatActivity() {
         const val RC_SIGN_IN = 207
         const val TAG = "MainActivityLog"
         const val FOLDER_NAME = "OABackup"
-        const val DB_NAME = "app_database.db"
+        const val DB_NAME = "student_database"
     }
 }
